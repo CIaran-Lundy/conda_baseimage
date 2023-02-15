@@ -1,0 +1,77 @@
+#FROM python:slim-buster AS builder_image
+
+MAINTAINER CIARAN LUNDY ciaranlundy@gmail.com
+
+RUN apt update && apt install --yes --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        default-jre \
+        git \
+        libbz2-dev \
+        liblzma-dev \
+        make \
+        tar \
+        wget \
+        unzip \
+        zlib1g-dev \
+        npm && \
+        apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+ARG PYTHON_VERSION=3.7
+ARG CONDA_PYTHON_VERSION=3
+ARG CONDA_DIR=/opt/conda
+
+# Install miniconda
+ENV PATH $CONDA_DIR/bin:$PATH
+RUN wget --quiet https://repo.continuum.io/miniconda/Miniconda$CONDA_PYTHON_VERSION-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    echo 'export PATH=$CONDA_DIR/bin:$PATH' > /etc/profile.d/conda.sh && \
+    /bin/bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
+    rm -rf /tmp/* && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN conda config --add channels bioconda
+
+RUN conda config --add channels conda-forge
+
+COPY requirements.txt requirements.txt
+
+RUN conda install --yes --file requirements.txt
+
+RUN conda-pack -o /tmp/env.tar && \
+  mkdir /installs && cd /installs && tar -xf /tmp/env.tar && \
+  rm /tmp/env.tar
+
+RUN /installs/bin/conda-unpack
+
+WORKDIR /installs
+
+
+####################################    RUN TIME IMAGE     ####################################
+
+FROM debian:buster-slim AS runtime
+
+RUN echo "deb http://security.debian.org/debian-security jessie/updates main" >> /etc/apt/sources.list
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libboost-dev \
+    libssl1.0.0 \
+    libssl-dev \
+    procps \
+    zip \
+    wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# copy in all neccessary packages from builder
+COPY --chown=1000 --from=builder_image /installs /installs
+
+#COPY --chown=1000 --from=builder_image /root/.local /root/.local
+
+#COPY ./src /
+
+ENV PATH "/installs/bin/:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin/:/installs/"
+
+ENTRYPOINT nextflow run main.nf
